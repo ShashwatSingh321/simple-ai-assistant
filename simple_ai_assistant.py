@@ -1,4 +1,3 @@
-
 import os
 import json
 from dotenv import load_dotenv
@@ -14,17 +13,27 @@ client = OpenAI(
 
 messages = []
 
+# Safety limit: maximum model rounds for one user question
+MAX_STEPS = 5
+
 messages.append(
     {
         "role": "system",
-        "content": "Act like a very humble agent and respond always under 20 words."
+        "content": (
+            "Act like a very humble agent and respond "
+            "always under 10 words."
+        )
     }
 )
 
+# Chat loop starts here
 while True:
     user_input = input("\nShashwat: ")
 
-    if user_input.lower() in ["exit", "quit", "bye", "goodbye"]:
+    if user_input.strip().lower() in [
+        "exit", "quit", "bye", "goodbye"
+    ]:
+        print("Assistant: Goodbye!")
         break
 
     messages.append(
@@ -34,26 +43,42 @@ while True:
         }
     )
 
-    response = client.chat.completions.create(
-        model=os.getenv("MODEL"),
-        messages=messages,
-        tools=TOOLS
-    )
+    # Chained tool calling
+    for step in range(MAX_STEPS):
+        response = client.chat.completions.create(
+            model=os.getenv("MODEL"),
+            messages=messages,
+            tools=TOOLS
+        )
 
-    msg = response.choices[0].message
+        msg = response.choices[0].message
 
-    if msg.tool_calls:
+        # The model has finished and doesn't need another tool
+        if not msg.tool_calls:
+            break
+
+        # Preserve the assistant's tool-call request
         messages.append(msg)
 
+        # Execute every tool requested in this round
         for tool_call in msg.tool_calls:
             func_name = tool_call.function.name
-            func_args = json.loads(
-                tool_call.function.arguments or "{}"
-            )
+            func_args = {}
 
-            fn = FUNCTION_NAME_TO_FUNCTION_MAP[func_name]
-            result = fn(**func_args)
+            try:
+                func_args = json.loads(
+                    tool_call.function.arguments or "{}"
+                )
 
+                fn = FUNCTION_NAME_TO_FUNCTION_MAP[func_name]
+                result = fn(**func_args)
+
+            except Exception as e:
+                result = (
+                    f"Error while running {func_name}: {e}"
+                )
+
+            # Return the tool result to the model
             messages.append(
                 {
                     "role": "tool",
@@ -62,18 +87,28 @@ while True:
                 }
             )
 
-        # Second call to LLM API
-        response = client.chat.completions.create(
-            model=os.getenv("MODEL"),
-            messages=messages
+    else:
+        # Ran out of steps without receiving a final answer
+        fallback = (
+            "Sorry, I could not finish this within "
+            "the step limit."
         )
 
-        msg = response.choices[0].message
+        messages.append(
+            {
+                "role": "assistant",
+                "content": fallback
+            }
+        )
 
+        print("Assistant: " + fallback)
+        continue
+
+    # Save and display the final model response
     messages.append(
         {
             "role": "assistant",
-            "content": msg.content
+            "content": msg.content or ""
         }
     )
 
