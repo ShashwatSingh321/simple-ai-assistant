@@ -1,10 +1,15 @@
+# standard library imports
 import os
-import json
-from dotenv import load_dotenv
-from openai import OpenAI
-from tools import TOOLS, FUNCTION_NAME_TO_FUNCTION_MAP
 
-load_dotenv()
+# Third-party imports
+from openai import OpenAI
+from dotenv import load_dotenv
+
+# Local modules
+from utilities.tools import TOOLS, run_tool
+from utilities.utilities import log
+
+load_dotenv() # by default looks for .env file
 
 client = OpenAI(
     base_url=os.getenv("BASE_URL"),
@@ -13,7 +18,7 @@ client = OpenAI(
 
 messages = []
 
-# Safety limit: maximum model rounds for one user question
+# Safety limit: the max number of model rounds for ONE user question
 MAX_STEPS = 5
 
 messages.append(
@@ -62,21 +67,8 @@ while True:
 
         # Execute every tool requested in this round
         for tool_call in msg.tool_calls:
-            func_name = tool_call.function.name
-            func_args = {}
-
-            try:
-                func_args = json.loads(
-                    tool_call.function.arguments or "{}"
-                )
-
-                fn = FUNCTION_NAME_TO_FUNCTION_MAP[func_name]
-                result = fn(**func_args)
-
-            except Exception as e:
-                result = (
-                    f"Error while running {func_name}: {e}"
-                )
+            # The complex logic is now handled inside run_tool
+            result = run_tool(tool_call)
 
             # Return the tool result to the model
             messages.append(
@@ -101,7 +93,7 @@ while True:
             }
         )
 
-        print("Assistant: " + fallback)
+        print("🤖 Assistant: " + fallback)
         continue
 
     # Save and display the final model response
@@ -112,4 +104,4 @@ while True:
         }
     )
 
-    print("Assistant: " + (msg.content or ""))
+    print("🤖 Assistant: " + (msg.content or ""))
